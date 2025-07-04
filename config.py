@@ -3,10 +3,9 @@ from urllib.parse import urlparse
 
 from browserforge.fingerprints import Screen
 
-CHROME_DIR = "Chrome"
 PROFILES_DIR = "Profiles"
 PROFILE_DIR = "NotBot"
-profile_path = os.path.abspath(os.path.join(CHROME_DIR, PROFILES_DIR, PROFILE_DIR))
+profile_path = os.path.abspath(os.path.join(PROFILES_DIR, PROFILE_DIR))
 os.makedirs(profile_path, exist_ok=True)
 
 BROWSER_OPTIONS = {
@@ -18,7 +17,7 @@ BROWSER_OPTIONS = {
     "persistent_context": True,
     "user_data_dir": profile_path,
     "locale": "en-US",
-    "geoip": True,
+    # "geoip": True,
 }
 
 
