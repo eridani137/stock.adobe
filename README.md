@@ -1,3 +1,7 @@
+Создать окружение: `python -m venv .venv`
+
+Активировать окружение (PowerShell): `.\.venv\Scripts\Activate.ps1`
+
 Установить зависимости: `pip install -r requirements.txt`
 
-Сбилдить в exe (PowerShell): `.\build.ps1`
+Собрать exe (PowerShell): `.\build.ps1`

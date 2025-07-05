@@ -25,7 +25,7 @@ def get_url() -> str:
 
 def get_count() -> int:
     while True:
-        count = input("Введите количество страниц (0 - без ограничения): ")
+        count = input("Введите количество страниц(0 - без ограничений): ")
         try:
             numer = int(count)
             return numer
@@ -43,50 +43,67 @@ async def main():
 
     passed_pages = 0
     index = 0
-    with open(file_path, 'w', newline='', encoding='utf-8') as file:
-        writer = csv.writer(file)
-        writer.writerow(['ID', 'Prompt'])
+    browser = None
 
-        async with AsyncCamoufox(
-                **config.BROWSER_OPTIONS
-        ) as browser:
+    try:
+        with open(file_path, 'w', newline='', encoding='utf-8') as file:
+            writer = csv.writer(file)
+            writer.writerow(['ID', 'Prompt'])
 
-            main_page = browser.pages[0]
-            await main_page.goto(url, wait_until="networkidle")
+            async with AsyncCamoufox(
+                    **config.BROWSER_OPTIONS
+            ) as browser_instance:
+                browser = browser_instance
+                main_page = browser.pages[0]
+                await main_page.goto(url, wait_until="networkidle")
 
-            while True:
-                if 0 < count <= passed_pages:
-                    logger.warning(f"Достигли заданное количество страниц")
-                    break
+                while True:
+                    images = await main_page.query_selector_all(
+                        "xpath=//div[@id='search-results']/div//meta[@itemprop='name']")
 
-                images = await main_page.query_selector_all(
-                    "xpath=//div[@id='search-results']/div//meta[@itemprop='name']")
-                if images:
-                    for image in images:
-                        parent = await image.evaluate_handle("el => el.parentElement")
-                        await parent.evaluate("el => el.scrollIntoView({behavior: 'smooth', block: 'center'})")
+                    if images:
+                        for image in images:
+                            parent = await image.evaluate_handle("el => el.parentElement")
+                            await parent.evaluate("el => el.scrollIntoView({behavior: 'smooth', block: 'center'})")
 
-                        image_name = await image.get_attribute("content")
-                        image_name_stripped = image_name.replace('\n', ' ').strip()
-                        image_name_stripped = re.sub(r'\s+', ' ', image_name_stripped).strip()
+                            image_name = await image.get_attribute("content")
 
-                        writer.writerow([index, image_name_stripped])
-                        logger.info(f"[{index}] {image_name_stripped}")
-                        index += 1
+                            if image_name:
+                                image_name_stripped = image_name.replace('\n', ' ').strip()
+                                image_name_stripped = re.sub(r'\s+', ' ', image_name_stripped).strip()
 
-                passed_pages += 1
-                next_page = await main_page.query_selector(
-                    "xpath=//div[@id='pagination-element']/nav//i[@class='mti-icon icon-arrow-right mti-large']/../..")
-                if next_page:
-                    await next_page.scroll_into_view_if_needed()
-                    await next_page.click()
-                    await asyncio.sleep(5)
-                    await main_page.wait_for_load_state("networkidle")
-                else:
-                    logger.warning("Кнопка следующей страницы не найдена")
-                    break
+                                writer.writerow([index, image_name_stripped])
+                                logger.info(f"[{index}] {image_name_stripped}")
+                                index += 1
+                            else:
+                                logger.warning("Обнаружен элемент изображения без атрибута 'content'. Пропускаем")
+                    else:
+                        logger.warning("На текущей странице не найдено изображений")
 
-            logger.warning(f"Пройдено {count} страниц(ы), завершаем работу")
+                    passed_pages += 1
+
+                    if 0 < count <= passed_pages:
+                        logger.warning(f"Достигли заданное количество страниц")
+                        break
+
+                    next_page = await main_page.query_selector(
+                        "xpath=//div[@id='pagination-element']/nav//i[@class='mti-icon icon-arrow-right mti-large']/../..")
+                    if next_page:
+                        await next_page.scroll_into_view_if_needed()
+                        await next_page.click()
+                        await asyncio.sleep(5)
+                        await main_page.wait_for_load_state("networkidle")
+                    else:
+                        logger.warning("Кнопка следующей страницы не найдена")
+                        break
+
+                logger.warning(f"Пройдено {count} страниц(ы), завершаем работу")
+                await browser.close()
+
+    except Exception as e:
+        logger.error(f"Произошла ошибка: {e}", exc_info=True)
+    finally:
+        if browser:
             await browser.close()
 
 
