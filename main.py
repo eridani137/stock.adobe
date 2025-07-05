@@ -42,7 +42,7 @@ async def main():
     os.makedirs(os.path.dirname(file_path), exist_ok=True)
 
     passed_pages = 0
-    index = 0
+    index = 1
     browser = None
 
     try:
@@ -89,10 +89,11 @@ async def main():
                     next_page = await main_page.query_selector(
                         "xpath=//div[@id='pagination-element']/nav//i[@class='mti-icon icon-arrow-right mti-large']/../..")
                     if next_page:
-                        await next_page.scroll_into_view_if_needed()
-                        await next_page.click()
-                        await asyncio.sleep(5)
-                        await main_page.wait_for_load_state("networkidle")
+                        next_page_url = await next_page.get_attribute("href")
+                        if next_page_url:
+                            await main_page.goto(next_page_url, wait_until="networkidle")
+                            await asyncio.sleep(5)
+                            await main_page.wait_for_load_state("networkidle")
                     else:
                         logger.warning("Кнопка следующей страницы не найдена")
                         break
