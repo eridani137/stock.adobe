@@ -63,9 +63,6 @@ async def main():
 
                     if images:
                         for image in images:
-                            parent = await image.evaluate_handle("el => el.parentElement")
-                            await parent.evaluate("el => el.scrollIntoView({behavior: 'smooth', block: 'center'})")
-
                             image_name = await image.get_attribute("content")
 
                             if image_name:
@@ -86,17 +83,51 @@ async def main():
                         logger.warning(f"Достигли заданное количество страниц")
                         break
 
-                    next_page = await main_page.query_selector(
-                        "xpath=//div[@id='pagination-element']/nav//i[@class='mti-icon icon-arrow-right mti-large']/../..")
-                    if next_page:
-                        next_page_url = await next_page.get_attribute("href")
-                        if next_page_url:
-                            await main_page.goto(next_page_url, wait_until="networkidle")
-                            await asyncio.sleep(5)
-                            await main_page.wait_for_load_state("networkidle")
-                    else:
-                        logger.warning("Кнопка следующей страницы не найдена")
+                    max_retries = 3
+                    next_page_clicked = False
+
+                    for retry in range(max_retries):
+                        try:
+                            await main_page.wait_for_timeout(1000)
+
+                            next_page = await main_page.query_selector(
+                                "xpath=//div[@id='pagination-element']/nav/span[last()]/button")
+
+                            if next_page:
+                                is_attached = await next_page.evaluate("el => el.isConnected")
+                                if not is_attached:
+                                    logger.warning(f"Элемент кнопки не прикреплен к DOM, повторная попытка {retry + 1}")
+                                    continue
+
+                                next_page_locator = main_page.locator(
+                                    "xpath=//div[@id='pagination-element']/nav/span[last()]/button")
+
+                                await next_page_locator.scroll_into_view_if_needed()
+                                await next_page_locator.click()
+
+                                await main_page.wait_for_load_state("networkidle")
+
+                                next_page_clicked = True
+                                break
+                            else:
+                                logger.warning("Кнопка следующей страницы не найдена")
+                                break
+
+                        except Exception as e:
+                            logger.warning(
+                                f"Ошибка при попытке перейти на следующую страницу (попытка {retry + 1}): {e}")
+                            if retry < max_retries - 1:
+                                await main_page.wait_for_timeout(2000)
+                                continue
+                            else:
+                                logger.error("Не удалось перейти на следующую страницу после всех попыток")
+                                break
+
+                    if not next_page_clicked:
+                        logger.warning("Не удалось найти или нажать кнопку следующей страницы")
                         break
+
+                    await main_page.wait_for_timeout(5000)
 
                 logger.warning(f"Пройдено {count} страниц(ы), завершаем работу")
                 await browser.close()
