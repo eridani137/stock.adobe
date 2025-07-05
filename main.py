@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os.path
+import re
 from datetime import datetime
 
 from camoufox import AsyncCamoufox
@@ -56,7 +57,8 @@ async def main():
                         parent = await image.evaluate_handle("el => el.parentElement")
                         await parent.evaluate("el => el.scrollIntoView({behavior: 'smooth', block: 'center'})")
                         image_name = await image.get_attribute("content")
-                        image_name_stripped = image_name.strip()
+                        image_name_stripped = image_name.replace('\n', ' ').strip()
+                        image_name_stripped = re.sub(r'\s+', ' ', image_name_stripped).strip()
                         file.write("{}\n".format(image_name_stripped))
                         logger.info(image_name_stripped)
                 passed_pages = passed_pages + 1
