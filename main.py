@@ -202,14 +202,16 @@ async def main():
                     if need_wait_selector:
                         await main_page.wait_for_selector(selector, timeout=60000)
 
+                    await asyncio.sleep(5)
+
                     images = await main_page.query_selector_all(selector)
                     if images:
                         for image in images:
                             try:
                                 image_href = await image.get_attribute("href")
                                 image_name_elem = await image.query_selector("xpath=/meta[@itemprop='name']")
-                                if image_name_elem and image_href:
-                                    await image.scroll_into_view_if_needed()
+                                duration = await image.query_selector("xpath=/meta[@itemprop='duration']")
+                                if image_name_elem and image_href and not duration and not "/3d-assets/" in image_href:
                                     image_href += "?prev_url=detail"
                                     image_name_content = await image_name_elem.get_attribute("content")
                                     if image_name_content:
@@ -273,6 +275,7 @@ async def main():
 
                 logger.warning(f"Пройдено {count} страниц(ы), завершаем работу")
                 await browser.close()
+                await session.close()
 
     except Exception as e:
         logger.error(f"Произошла ошибка: {e}", exc_info=True)
@@ -326,7 +329,6 @@ async def goto_next_page(page: Page) -> Tuple[bool, bool]:
 
                 next_page_locator = page.locator(selector)
 
-                await next_page_locator.scroll_into_view_if_needed()
                 await next_page_locator.click()
 
                 next_page_clicked = True
