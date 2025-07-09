@@ -94,25 +94,32 @@ async def main():
     count = get_count()
 
     timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
-    file_path = os.path.join(os.path.curdir, "results", timestamp + '.csv')
-    os.makedirs(os.path.dirname(file_path), exist_ok=True)
+
+    first_file_path = os.path.join(os.path.curdir, "prompt", timestamp + '.csv')
+    os.makedirs(os.path.dirname(first_file_path), exist_ok=True)
+
+    second_file_path = os.path.join(os.path.curdir, "metadata", timestamp + '.csv')
+    os.makedirs(os.path.dirname(second_file_path), exist_ok=True)
 
     passed_pages = 0
     index = 1
     browser = None
-    # seen_prompts = set()
     is_complete = False
 
     try:
-        with open(file_path, 'w', newline='', encoding='utf-8') as file:
-            writer = csv.writer(file)
-            writer.writerow(['ID', 'Prompt'])
+        with open(first_file_path, 'w', newline='', encoding='utf-8') as prompt_file, \
+                open(second_file_path, 'w', newline='', encoding='utf-8') as metadata_file:
 
-            async with AsyncCamoufox(
-                    **config.BROWSER_OPTIONS
-            ) as browser_instance:
+            prompt_writer = csv.writer(prompt_file)
+            prompt_writer.writerow(['ID', 'Prompt'])
+
+            metadata_writer = csv.writer(metadata_file)
+            metadata_writer.writerow(['Filename', 'Title', 'Description', 'Keywords'])
+
+            async with AsyncCamoufox(**config.BROWSER_OPTIONS) as browser_instance:
                 browser = browser_instance
                 main_page = await browser.new_page()
+
                 await main_page.goto(url)
 
                 await asyncio.sleep(7)
@@ -128,7 +135,6 @@ async def main():
                 )
 
                 while True:
-
                     await asyncio.sleep(3)
 
                     images = await main_page.query_selector_all(
@@ -170,13 +176,12 @@ async def main():
                                             valid_json_array = f"[{keywords_string}]"
                                             keywords = json.loads(valid_json_array)
 
-
-
                                             # if image_name_stripped in seen_prompts:
                                             #     logger.warning(f"Пропущен дубликат: {image_name_stripped}")
                                             #     continue
 
-                                            writer.writerow([index, image_name_stripped])
+                                            prompt_writer.writerow([index, image_name_stripped])
+
                                             logger.info(f"[{index}] {image_name_stripped}")
 
                                         index += 1
