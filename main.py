@@ -124,12 +124,12 @@ async def main():
 
                 await asyncio.sleep(7)
 
-                cookies = await browser.contexts[0].cookies()
-                aiohttp_cookies = {cookie["name"]: cookie["value"] for cookie in cookies}
+                # cookies = await browser.contexts[0].cookies()
+                # aiohttp_cookies = {cookie["name"]: cookie["value"] for cookie in cookies}
 
                 session = create_tls_session(
                     headers=DEFAULT_HEADERS.copy(),
-                    cookies=aiohttp_cookies,
+                    # cookies=aiohttp_cookies,
                     max_line_size=8190 * 3,
                     max_field_size=8190 * 3,
                 )
