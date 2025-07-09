@@ -1,15 +1,22 @@
 import asyncio
+import json
 import logging
 import os.path
 import re
+import ssl
 from datetime import datetime
 import csv
+import demjson3
 
 from camoufox import AsyncCamoufox
+from idna.idnadata import scripts
 
 import config
 from config import is_valid_url
 from configure_logger import configure
+import aiohttp
+from aiohttp import ClientSession
+from parsel import Selector
 
 logger = logging.getLogger(__name__)
 configure(logger)
@@ -31,6 +38,55 @@ def get_count() -> int:
             return numer
         except ValueError:
             print("Некорректное число. Попробуйте ещё раз.")
+
+
+DEFAULT_HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) Gecko/20100101 Firefox/135.0',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+    'Accept-Language': 'ru,en-US;q=0.7,en;q=0.3',
+    'Referer': 'https://stock.adobe.com/',
+    'Sec-Fetch-Dest': 'document',
+    'Sec-Fetch-Mode': 'navigate',
+    'Sec-Fetch-Site': 'same-origin',
+    'Sec-Fetch-User': '?1',
+    'Upgrade-Insecure-Requests': '1',
+    'Connection': 'keep-alive',
+}
+
+
+def create_tls_session(*args, **kwargs) -> ClientSession:
+    ssl_context = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
+
+    try:
+        ssl_context.set_ciphers(':'.join([
+            "ECDHE-ECDSA-AES128-GCM-SHA256",
+            "ECDHE-RSA-AES128-GCM-SHA256",
+            "ECDHE-ECDSA-AES256-GCM-SHA384",
+            "ECDHE-RSA-AES256-GCM-SHA384",
+            "ECDHE-ECDSA-CHACHA20-POLY1305",
+            "ECDHE-RSA-CHACHA20-POLY1305",
+            "ECDHE-RSA-AES128-SHA",
+            "ECDHE-RSA-AES256-SHA",
+            "AES128-GCM-SHA256",
+            "AES256-GCM-SHA384"
+        ]))
+    except ssl.SSLError as e:
+        logging.warning(f"Не удалось установить пользовательские шифры: {e}. Используем шифры по умолчанию.")
+
+    try:
+        ssl_context.set_ecdh_curve("prime256v1")
+    except (ssl.SSLError, ValueError) as e:
+        logging.warning(f"Не удалось установить эллиптическую кривую: {e}")
+
+    ssl_context.minimum_version = ssl.TLSVersion.TLSv1_2
+    ssl_context.maximum_version = ssl.TLSVersion.TLSv1_3
+
+    tls_connector = aiohttp.TCPConnector(ssl=ssl_context)
+
+    session_kwargs = kwargs.copy()
+    session_kwargs['connector'] = tls_connector
+
+    return aiohttp.ClientSession(*args, **session_kwargs)
 
 
 async def main():
@@ -61,31 +117,74 @@ async def main():
 
                 await asyncio.sleep(7)
 
+                cookies = await browser.contexts[0].cookies()
+                aiohttp_cookies = {cookie["name"]: cookie["value"] for cookie in cookies}
+
+                session = create_tls_session(
+                    headers=DEFAULT_HEADERS.copy(),
+                    cookies=aiohttp_cookies,
+                    max_line_size=8190 * 3,
+                    max_field_size=8190 * 3,
+                )
+
                 while True:
 
                     await asyncio.sleep(3)
 
                     images = await main_page.query_selector_all(
-                        "xpath=//div[@id='search-results']/div//meta[@itemprop='name']")
+                        "xpath=//div[@id='search-results']/div/div/a")
 
                     if images:
                         for image in images:
-                            image_name = await image.get_attribute("content")
+                            try:
+                                image_href = await image.get_attribute("href")
+                                image_name_elem = await image.query_selector("xpath=/meta[@itemprop='name']")
+                                if image_name_elem and image_href:
+                                    image_name = await image_name_elem.get_attribute("content")
+                                    if image_name:
+                                        image_name_stripped = image_name.replace('\n', ' ').strip()
+                                        image_name_stripped = re.sub(r'\s+', ' ', image_name_stripped).strip()
 
-                            if image_name:
-                                image_name_stripped = image_name.replace('\n', ' ').strip()
-                                image_name_stripped = re.sub(r'\s+', ' ', image_name_stripped).strip()
+                                        async with session.get(image_href) as response:
+                                            response.raise_for_status()
 
-                                # if image_name_stripped in seen_prompts:
-                                #     logger.warning(f"Пропущен дубликат: {image_name_stripped}")
-                                #     continue
+                                            html = await response.text()
+                                            sel = Selector(text=html)
 
-                                # seen_prompts.add(image_name_stripped)
-                                writer.writerow([index, image_name_stripped])
-                                logger.info(f"[{index}] {image_name_stripped}")
-                                index += 1
-                            else:
-                                logger.warning("Обнаружен элемент изображения без атрибута 'content'. Пропускаем")
+                                            script_text = sel.xpath(
+                                                "//body/script[@nonce and contains(text(),'window.__CLIENT_CONFIG__')]/text()").get()
+                                            if not script_text:
+                                                logger.info("Скрипт не найден")
+                                                continue
+
+                                            keywords = []
+
+                                            pattern = r'"keywords"\s*:\s*\[(.*?)\]'
+                                            match = re.search(pattern, script_text)
+
+                                            if not match:
+                                                logger.error("Не удалось найти теги в скрипте")
+                                                continue
+
+                                            keywords_string = match.group(1)
+                                            valid_json_array = f"[{keywords_string}]"
+                                            keywords = json.loads(valid_json_array)
+
+
+
+                                            # if image_name_stripped in seen_prompts:
+                                            #     logger.warning(f"Пропущен дубликат: {image_name_stripped}")
+                                            #     continue
+
+                                            writer.writerow([index, image_name_stripped])
+                                            logger.info(f"[{index}] {image_name_stripped}")
+
+                                        index += 1
+                                    else:
+                                        logger.warning(
+                                            "Обнаружен элемент изображения без атрибута 'content' или 'href'. Пропускаем")
+                            except Exception as e:
+                                logger.error(f"Ошибка при обработке: {e}")
                     else:
                         logger.warning("На текущей странице не найдено изображений")
 
