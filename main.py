@@ -2,14 +2,17 @@ import asyncio
 import json
 import logging
 import os.path
+import random
 import re
 import ssl
 from datetime import datetime
 import csv
-from typing import Tuple
+from typing import Tuple, List
 
+import nltk
 from camoufox import AsyncCamoufox
-from idna.idnadata import scripts
+from nltk import word_tokenize, pos_tag
+from nltk.corpus import wordnet
 from playwright.async_api import Page
 
 import config
@@ -89,7 +92,53 @@ def create_tls_session(*args, **kwargs) -> ClientSession:
     return aiohttp.ClientSession(*args, **session_kwargs)
 
 
+def replace_first_adjective(text: str) -> str:
+    tokens = word_tokenize(text)
+    tagged = pos_tag(tokens)
+
+    for i, (word, tag) in enumerate(tagged):
+        if tag.startswith("JJ"):
+            synonyms = get_adjective_synonyms(word)
+            if synonyms:
+                synonym = random.choice(synonyms)
+                if word[0].isupper():
+                    synonym = synonym.capitalize()
+                tokens[i] = synonym
+                break
+
+    return ' '.join(tokens)
+
+
+def get_adjective_synonyms(word: str) -> List[str]:
+    synonyms = set()
+    for syn in wordnet.synsets(word.lower(), pos=wordnet.ADJ):
+        for lemma in syn.lemmas():
+            if lemma.name().lower() != word.lower():
+                synonyms.add(lemma.name().replace('_', ' '))
+    return list(synonyms)
+
+
+def get_synonyms(word: str) -> List[str]:
+    synonyms = set()
+    for syn in wordnet.synsets(word.lower()):
+        for lemma in syn.lemmas():
+            synonym = lemma.name().replace('_', ' ')
+            if synonym.lower() != word.lower():
+                synonyms.add(synonym)
+    return list(synonyms)
+
+
+def get_random_synonym(word: str) -> str:
+    all_synonyms = get_synonyms(word)
+    return random.choice(all_synonyms) if all_synonyms else word
+
+
 async def main():
+    nltk.download('wordnet')
+    nltk.download('punkt_tab')
+    nltk.download('averaged_perceptron_tagger_eng')
+    nltk.download('omw-1.4')
+
     url = get_url()
     count = get_count()
 
@@ -139,8 +188,8 @@ async def main():
                                 if image_name_elem and image_href:
                                     image_name_content = await image_name_elem.get_attribute("content")
                                     if image_name_content:
-                                        image_name = image_name_content.replace('\n', ' ').strip()
-                                        image_name = re.sub(r'\s+', ' ', image_name).strip()
+                                        name = image_name_content.replace('\n', ' ').strip()
+                                        name = re.sub(r'\s+', ' ', name).strip()
 
                                         async with session.get(image_href) as response:
                                             response.raise_for_status()
@@ -152,13 +201,19 @@ async def main():
                                                 logger.error("Нет тегов")
                                                 continue
 
+                                            name_syn = replace_first_adjective(name)
 
+                                            last_keyword = keywords.pop()
+                                            keywords.pop()
 
-                                            prompt_writer.writerow([index, image_name])
+                                            last_keyword_syn = get_random_synonym(last_keyword)
+                                            keywords.append(last_keyword_syn)
 
-                                            metadata_writer.writerow([index, '', image_name, ''])
+                                            prompt_writer.writerow([index, name_syn])
 
-                                            logger.info(f"[{index}] {image_name}")
+                                            metadata_writer.writerow([index, name_syn, name, ''])
+
+                                            logger.info(f"[{index}] {name}")
 
                                             index += 1
                                     else:
