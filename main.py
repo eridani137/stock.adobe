@@ -1,4 +1,5 @@
 import asyncio
+import csv
 import json
 import logging
 import os.path
@@ -6,23 +7,20 @@ import random
 import re
 import ssl
 from datetime import datetime
-import csv
 from typing import Tuple, List
 
-import nltk
-import spacy
+import aiohttp
 import en_core_web_sm
+import nltk
+from aiohttp import ClientSession
 from camoufox import AsyncCamoufox
-from nltk import word_tokenize, pos_tag
 from nltk.corpus import wordnet
+from parsel import Selector
 from playwright.async_api import Page
 
 import config
 from config import is_valid_url
 from configure_logger import configure
-import aiohttp
-from aiohttp import ClientSession
-from parsel import Selector
 
 logger = logging.getLogger(__name__)
 configure(logger)
@@ -199,82 +197,99 @@ async def main():
                 need_wait_selector = False
 
                 while True:
-                    if need_wait_selector:
-                        await main_page.wait_for_selector(selector, timeout=60000)
+                    try:
+                        if session.closed:
+                            cookies = await browser.contexts[0].cookies()
+                            aiohttp_cookies = {cookie["name"]: cookie["value"] for cookie in cookies}
 
-                    await asyncio.sleep(5)
+                            await session.close()
 
-                    images = await main_page.query_selector_all(selector)
-                    if images:
-                        for image in images:
-                            try:
-                                image_href = await image.get_attribute("href")
-                                image_name_elem = await image.query_selector("xpath=/meta[@itemprop='name']")
-                                duration = await image.query_selector("xpath=/meta[@itemprop='duration']")
-                                if image_name_elem and image_href and not duration and not "/3d-assets/" in image_href and not "/templates/" in image_href:
-                                    image_href += "?prev_url=detail"
-                                    image_name_content = await image_name_elem.get_attribute("content")
-                                    if image_name_content:
-                                        name = image_name_content.replace('\n', ' ').strip()
-                                        name = re.sub(r'\s+', ' ', name).strip()
+                            session = create_tls_session(
+                                headers=headers.copy(),
+                                cookies=aiohttp_cookies,
+                                max_line_size=8190 * 2,
+                                max_field_size=8190 * 2,
+                            )
 
-                                        async with session.get(image_href) as response:
-                                            response.raise_for_status()
+                        if need_wait_selector:
+                            await main_page.wait_for_selector(selector, timeout=60000)
 
-                                            html = await response.text()
-                                            keywords = get_keywords(html)
-                                            if not keywords:
-                                                logger.error("Теги не были получены: {}".format(image_href))
-                                                continue
+                        await asyncio.sleep(5)
 
-                                            name_syn = replace_first_adjective(name)
+                        images = await main_page.query_selector_all(selector)
+                        if images:
+                            for image in images:
+                                try:
+                                    image_href = await image.get_attribute("href")
+                                    image_name_elem = await image.query_selector("xpath=/meta[@itemprop='name']")
+                                    duration = await image.query_selector("xpath=/meta[@itemprop='duration']")
+                                    if image_name_elem and image_href and not duration and not "/3d-assets/" in image_href and not "/templates/" in image_href:
+                                        image_href += "?prev_url=detail"
+                                        image_name_content = await image_name_elem.get_attribute("content")
+                                        if image_name_content:
+                                            name = image_name_content.replace('\n', ' ').strip()
+                                            name = re.sub(r'\s+', ' ', name).strip()
 
-                                            keywords_count = len(keywords)
-                                            if keywords_count >= 2:
-                                                last_keyword = keywords[-1]
-                                                last_keyword_syn = get_random_synonym_for_phrase(last_keyword)
-                                                if not last_keyword_syn:
-                                                    last_keyword_syn = last_keyword
+                                            async with session.get(image_href) as response:
+                                                response.raise_for_status()
 
-                                                keywords[-2:] = [last_keyword_syn]
-                                            else:
-                                                logger.warning(
-                                                    f"Количество тегов {keywords_count}, не могу сделать срез 2-х слов")
-                                                continue
+                                                html = await response.text()
+                                                keywords = get_keywords(html)
+                                                if not keywords:
+                                                    logger.error("Теги не были получены: {}".format(image_href))
+                                                    continue
 
-                                            prompt_writer.writerow([index, name_syn])
-                                            metadata_writer.writerow([index, name_syn, name, ', '.join(keywords)])
+                                                name_syn = replace_first_adjective(name)
 
-                                            prompt_file.flush()
-                                            metadata_file.flush()
+                                                keywords_count = len(keywords)
+                                                if keywords_count >= 2:
+                                                    last_keyword = keywords[-1]
+                                                    last_keyword_syn = get_random_synonym_for_phrase(last_keyword)
+                                                    if not last_keyword_syn:
+                                                        last_keyword_syn = last_keyword
 
-                                            logger.info(f"[{index}] {name}")
-                                            index += 1
-                                    else:
-                                        logger.warning(
-                                            "Обнаружен элемент изображения без атрибута 'content' или 'href'. Пропускаем")
-                            except Exception as e:
-                                logger.error(f"Ошибка при обработке: {e}")
+                                                    keywords[-2:] = [last_keyword_syn]
+                                                else:
+                                                    logger.warning(
+                                                        f"Количество тегов {keywords_count}, не могу сделать срез 2-х слов")
+                                                    continue
 
-                        passed_pages += 1
+                                                prompt_writer.writerow([index, name_syn])
+                                                metadata_writer.writerow([index, name_syn, name, ', '.join(keywords)])
 
-                    else:
-                        logger.warning("На текущей странице не найдено изображений")
+                                                prompt_file.flush()
+                                                metadata_file.flush()
 
-                    if 0 < count <= passed_pages:
-                        logger.info(f"Достигли заданного количества страниц")
-                        break
+                                                logger.info(f"[{index}] {name}")
+                                                index += 1
+                                        else:
+                                            logger.warning(
+                                                "Обнаружен элемент изображения без атрибута 'content' или 'href'. Пропускаем")
+                                except Exception as e:
+                                    logger.error(f"Ошибка при обработке: {e}")
 
-                    is_complete, next_page_clicked = await goto_next_page(main_page)
-                    need_wait_selector = True
+                            passed_pages += 1
 
-                    if is_complete:
-                        logger.info("Достигнута последняя доступная страница")
-                        break
+                        else:
+                            logger.warning("На текущей странице не найдено изображений")
 
-                    if not next_page_clicked:
-                        logger.warning("Не удалось найти или нажать кнопку следующей страницы")
-                        break
+                        if 0 < count <= passed_pages:
+                            logger.info(f"Достигли заданного количества страниц")
+                            break
+
+                        is_complete, next_page_clicked = await goto_next_page(main_page)
+                        need_wait_selector = True
+
+                        if is_complete:
+                            logger.info("Достигнута последняя доступная страница")
+                            break
+
+                        if not next_page_clicked:
+                            logger.warning("Не удалось найти или нажать кнопку следующей страницы")
+                            break
+
+                    except Exception as e:
+                        continue
 
                 logger.warning(f"Пройдено {count} страниц(ы), завершаем работу")
                 await browser.close()

@@ -1,10 +1,16 @@
+$nltkDataPath = "C:\Users\eridani\AppData\Roaming\nltk_data"
+$spacyModelPath = "S:\dev\python\stock.adobe_parser\.venv\Lib\site-packages\en_core_web_sm"
+
 $mainScript = "main.py"
 
 $addData = @(
     "C:\Users\eridani\.conda\envs\miniconda\Lib\site-packages\browserforge\fingerprints\data;browserforge\fingerprints\data",
     "C:\Users\eridani\.conda\envs\miniconda\Lib\site-packages\browserforge\headers\data;browserforge\headers\data",
     "C:\Users\eridani\.conda\envs\miniconda\Lib\site-packages\camoufox\browserforge.yml;camoufox",
-    "C:\Users\eridani\.conda\envs\miniconda\Lib\site-packages\language_tags\data;language_tags\data"
+    "C:\Users\eridani\.conda\envs\miniconda\Lib\site-packages\language_tags\data;language_tags\data",
+
+    "$($nltkDataPath);nltk_data",
+    "$($spacyModelPath);en_core_web_sm"
 )
 
 $collectAll = @(
@@ -12,7 +18,9 @@ $collectAll = @(
     "browserforge",
     "language_tags",
     "playwright",
-    "patchright"
+    "patchright",
+    "nltk",
+    "spacy"
 )
 
 $addDataArgs = $addData | ForEach-Object { "--add-data `"$($_)`"" }
@@ -21,7 +29,7 @@ $addDataArgsString = $addDataArgs -join " "
 $collectAllArgs = $collectAll | ForEach-Object { "--collect-all `"$($_)`"" }
 $collectAllArgsString = $collectAllArgs -join " "
 
-$pyinstallerCommand = "pyinstaller $addDataArgsString $collectAllArgsString `"$mainScript`""
+$pyinstallerCommand = "pyinstaller --noconfirm --clean $addDataArgsString $collectAllArgsString `"$mainScript`""
 
 Write-Host "Выполняется команда PyInstaller:"
 Write-Host $pyinstallerCommand
