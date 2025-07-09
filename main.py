@@ -137,41 +137,28 @@ async def main():
                                 image_href = await image.get_attribute("href")
                                 image_name_elem = await image.query_selector("xpath=/meta[@itemprop='name']")
                                 if image_name_elem and image_href:
-                                    image_name = await image_name_elem.get_attribute("content")
-                                    if image_name:
-                                        image_name_stripped = image_name.replace('\n', ' ').strip()
-                                        image_name_stripped = re.sub(r'\s+', ' ', image_name_stripped).strip()
+                                    image_name_content = await image_name_elem.get_attribute("content")
+                                    if image_name_content:
+                                        image_name = image_name_content.replace('\n', ' ').strip()
+                                        image_name = re.sub(r'\s+', ' ', image_name).strip()
 
                                         async with session.get(image_href) as response:
                                             response.raise_for_status()
 
                                             html = await response.text()
-                                            sel = Selector(text=html)
-
-                                            script_text = sel.xpath(
-                                                "//body/script[@nonce and contains(text(),'window.__CLIENT_CONFIG__')]/text()").get()
-                                            if not script_text:
-                                                logger.info("Скрипт не найден")
-                                                continue
-
-                                            pattern = r'"keywords"\s*:\s*\[(.*?)\]'
-                                            match = re.search(pattern, script_text)
-
-                                            if not match:
-                                                logger.error("Не удалось найти теги в скрипте")
-                                                continue
-
-                                            keywords_string = match.group(1)
-                                            valid_json_array = f"[{keywords_string}]"
-                                            keywords = json.loads(valid_json_array)
+                                            keywords = get_keywords(html)
 
                                             if not keywords:
                                                 logger.error("Нет тегов")
                                                 continue
 
-                                            prompt_writer.writerow([index, image_name_stripped])
 
-                                            logger.info(f"[{index}] {image_name_stripped}")
+
+                                            prompt_writer.writerow([index, image_name])
+
+                                            metadata_writer.writerow([index, '', image_name, ''])
+
+                                            logger.info(f"[{index}] {image_name}")
 
                                             index += 1
                                     else:
@@ -209,6 +196,29 @@ async def main():
     finally:
         if browser:
             await browser.close()
+
+
+def get_keywords(html_content: str) -> list[str] | None:
+    sel = Selector(text=html_content)
+
+    script_text = sel.xpath(
+        "//body/script[@nonce and contains(text(),'window.__CLIENT_CONFIG__')]/text()").get()
+    if not script_text:
+        logger.info("Скрипт не найден")
+        return None
+
+    pattern = r'"keywords"\s*:\s*\[(.*?)\]'
+    match = re.search(pattern, script_text)
+
+    if not match:
+        logger.error("Не удалось найти теги в скрипте")
+        return None
+
+    keywords_string = match.group(1)
+    valid_json_array = f"[{keywords_string}]"
+    keywords = json.loads(valid_json_array)
+
+    return keywords
 
 
 async def goto_next_page(page: Page) -> Tuple[bool, bool]:
