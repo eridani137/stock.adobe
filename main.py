@@ -10,6 +10,8 @@ import csv
 from typing import Tuple, List
 
 import nltk
+import spacy
+import en_core_web_sm
 from camoufox import AsyncCamoufox
 from nltk import word_tokenize, pos_tag
 from nltk.corpus import wordnet
@@ -24,6 +26,12 @@ from parsel import Selector
 
 logger = logging.getLogger(__name__)
 configure(logger)
+
+nlp = en_core_web_sm.load()
+nltk.download('wordnet')
+nltk.download('punkt_tab')
+nltk.download('averaged_perceptron_tagger_eng')
+nltk.download('omw-1.4')
 
 headers = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) Gecko/20100101 Firefox/135.0',
@@ -93,16 +101,20 @@ def create_tls_session(*args, **kwargs) -> ClientSession:
 
 
 def replace_first_adjective(text: str) -> str:
-    tokens = word_tokenize(text)
-    tagged = pos_tag(tokens)
+    doc = nlp(text)
 
-    for i, (word, tag) in enumerate(tagged):
-        if tag.startswith("JJ"):
+    tokens = [token.text for token in doc]
+
+    for i, token in enumerate(doc):
+        if token.pos_ == 'ADJ':
+            word = token.text
             synonyms = get_adjective_synonyms(word)
+
             if synonyms:
                 synonym = random.choice(synonyms)
                 if word[0].isupper():
                     synonym = synonym.capitalize()
+
                 tokens[i] = synonym
                 break
 
@@ -128,17 +140,18 @@ def get_synonyms(word: str) -> List[str]:
     return list(synonyms)
 
 
-def get_random_synonym(word: str) -> str:
+def get_random_synonym_for_word(word: str) -> str:
     all_synonyms = get_synonyms(word)
     return random.choice(all_synonyms) if all_synonyms else word
 
 
-async def main():
-    nltk.download('wordnet')
-    nltk.download('punkt_tab')
-    nltk.download('averaged_perceptron_tagger_eng')
-    nltk.download('omw-1.4')
+def get_random_synonym_for_phrase(phrase: str) -> str:
+    words = phrase.split(' ')
+    new_words = [get_random_synonym_for_word(word) for word in words]
+    return ' '.join(new_words)
 
+
+async def main():
     url = get_url()
     count = get_count()
 
@@ -153,12 +166,7 @@ async def main():
     passed_pages = 0
     index = 1
     browser = None
-
-    session = create_tls_session(
-        headers=headers.copy(),
-        max_line_size=8190 * 3,
-        max_field_size=8190 * 3,
-    )
+    is_first_page = True
 
     try:
         async with AsyncCamoufox(**config.BROWSER_OPTIONS) as browser_instance:
@@ -176,16 +184,33 @@ async def main():
 
                 await main_page.goto(url)
 
-                while True:
-                    await asyncio.sleep(5)
+                selector = "xpath=//div[@id='search-results']/div/div/a"
+                await main_page.wait_for_selector(selector, timeout=60000)
 
-                    images = await main_page.query_selector_all("xpath=//div[@id='search-results']/div/div/a")
+                cookies = await browser.contexts[0].cookies()
+                aiohttp_cookies = {cookie["name"]: cookie["value"] for cookie in cookies}
+
+                session = create_tls_session(
+                    headers=headers.copy(),
+                    cookies=aiohttp_cookies,
+                    max_line_size=8190 * 3,
+                    max_field_size=8190 * 3,
+                )
+
+                is_first_page = False
+
+                while True:
+                    if not is_first_page:
+                        await main_page.wait_for_selector(selector, timeout=60000)
+
+                    images = await main_page.query_selector_all(selector)
                     if images:
                         for image in images:
                             try:
                                 image_href = await image.get_attribute("href")
                                 image_name_elem = await image.query_selector("xpath=/meta[@itemprop='name']")
                                 if image_name_elem and image_href:
+                                    image_href += "?prev_url=detail"
                                     image_name_content = await image_name_elem.get_attribute("content")
                                     if image_name_content:
                                         name = image_name_content.replace('\n', ' ').strip()
@@ -203,18 +228,23 @@ async def main():
 
                                             name_syn = replace_first_adjective(name)
 
-                                            last_keyword = keywords.pop()
-                                            keywords.pop()
+                                            keywords_count = len(keywords)
+                                            if keywords_count >= 2:
+                                                last_keyword = keywords[-1]
+                                                last_keyword_syn = get_random_synonym_for_phrase(last_keyword)
+                                                if not last_keyword_syn:
+                                                    last_keyword_syn = last_keyword
 
-                                            last_keyword_syn = get_random_synonym(last_keyword)
-                                            keywords.append(last_keyword_syn)
+                                                keywords[-2:] = [last_keyword_syn]
+                                            else:
+                                                logger.warning(
+                                                    f"Количество тегов {keywords_count}, не могу сделать срез 2-х слов")
+                                                continue
 
                                             prompt_writer.writerow([index, name_syn])
-
                                             metadata_writer.writerow([index, name_syn, name, ''])
 
                                             logger.info(f"[{index}] {name}")
-
                                             index += 1
                                     else:
                                         logger.warning(
@@ -240,8 +270,6 @@ async def main():
                     if not next_page_clicked:
                         logger.warning("Не удалось найти или нажать кнопку следующей страницы")
                         break
-
-                    await asyncio.sleep(15)
 
                 logger.warning(f"Пройдено {count} страниц(ы), завершаем работу")
                 await browser.close()
