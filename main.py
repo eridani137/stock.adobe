@@ -6,10 +6,11 @@ import re
 import ssl
 from datetime import datetime
 import csv
-import demjson3
+from typing import Tuple
 
 from camoufox import AsyncCamoufox
 from idna.idnadata import scripts
+from playwright.async_api import Page
 
 import config
 from config import is_valid_url
@@ -20,6 +21,19 @@ from parsel import Selector
 
 logger = logging.getLogger(__name__)
 configure(logger)
+
+headers = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) Gecko/20100101 Firefox/135.0',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+    'Accept-Language': 'ru,en-US;q=0.7,en;q=0.3',
+    'Referer': 'https://stock.adobe.com/',
+    'Sec-Fetch-Dest': 'document',
+    'Sec-Fetch-Mode': 'navigate',
+    'Sec-Fetch-Site': 'same-origin',
+    'Sec-Fetch-User': '?1',
+    'Upgrade-Insecure-Requests': '1',
+    'Connection': 'keep-alive',
+}
 
 
 def get_url() -> str:
@@ -38,20 +52,6 @@ def get_count() -> int:
             return numer
         except ValueError:
             print("Некорректное число. Попробуйте ещё раз.")
-
-
-DEFAULT_HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) Gecko/20100101 Firefox/135.0',
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
-    'Accept-Language': 'ru,en-US;q=0.7,en;q=0.3',
-    'Referer': 'https://stock.adobe.com/',
-    'Sec-Fetch-Dest': 'document',
-    'Sec-Fetch-Mode': 'navigate',
-    'Sec-Fetch-Site': 'same-origin',
-    'Sec-Fetch-User': '?1',
-    'Upgrade-Insecure-Requests': '1',
-    'Connection': 'keep-alive',
-}
 
 
 def create_tls_session(*args, **kwargs) -> ClientSession:
@@ -104,42 +104,33 @@ async def main():
     passed_pages = 0
     index = 1
     browser = None
-    is_complete = False
+
+    session = create_tls_session(
+        headers=headers.copy(),
+        max_line_size=8190 * 3,
+        max_field_size=8190 * 3,
+    )
 
     try:
-        with open(first_file_path, 'w', newline='', encoding='utf-8') as prompt_file, \
-                open(second_file_path, 'w', newline='', encoding='utf-8') as metadata_file:
+        async with AsyncCamoufox(**config.BROWSER_OPTIONS) as browser_instance:
+            browser = browser_instance
+            main_page = await browser.new_page()
 
-            prompt_writer = csv.writer(prompt_file)
-            prompt_writer.writerow(['ID', 'Prompt'])
+            with open(first_file_path, 'w', newline='', encoding='utf-8') as prompt_file, \
+                    open(second_file_path, 'w', newline='', encoding='utf-8') as metadata_file:
 
-            metadata_writer = csv.writer(metadata_file)
-            metadata_writer.writerow(['Filename', 'Title', 'Description', 'Keywords'])
+                prompt_writer = csv.writer(prompt_file)
+                prompt_writer.writerow(['ID', 'Prompt'])
 
-            async with AsyncCamoufox(**config.BROWSER_OPTIONS) as browser_instance:
-                browser = browser_instance
-                main_page = await browser.new_page()
+                metadata_writer = csv.writer(metadata_file)
+                metadata_writer.writerow(['Filename', 'Title', 'Description', 'Keywords'])
 
                 await main_page.goto(url)
 
-                await asyncio.sleep(7)
-
-                # cookies = await browser.contexts[0].cookies()
-                # aiohttp_cookies = {cookie["name"]: cookie["value"] for cookie in cookies}
-
-                session = create_tls_session(
-                    headers=DEFAULT_HEADERS.copy(),
-                    # cookies=aiohttp_cookies,
-                    max_line_size=8190 * 3,
-                    max_field_size=8190 * 3,
-                )
-
                 while True:
-                    await asyncio.sleep(3)
+                    await asyncio.sleep(5)
 
-                    images = await main_page.query_selector_all(
-                        "xpath=//div[@id='search-results']/div/div/a")
-
+                    images = await main_page.query_selector_all("xpath=//div[@id='search-results']/div/div/a")
                     if images:
                         for image in images:
                             try:
@@ -188,55 +179,17 @@ async def main():
                                             "Обнаружен элемент изображения без атрибута 'content' или 'href'. Пропускаем")
                             except Exception as e:
                                 logger.error(f"Ошибка при обработке: {e}")
+
+                        passed_pages += 1
+
                     else:
                         logger.warning("На текущей странице не найдено изображений")
 
-                    passed_pages += 1
-
                     if 0 < count <= passed_pages:
-                        logger.warning(f"Достигли заданное количество страниц")
+                        logger.info(f"Достигли заданного количества страниц")
                         break
 
-                    max_retries = 7
-                    next_page_clicked = False
-
-                    for retry in range(max_retries):
-                        try:
-                            await asyncio.sleep(2)
-
-                            next_page = await main_page.query_selector(
-                                "xpath=//div[@id='pagination-element']/nav/span[last()]/button")
-
-                            if next_page:
-                                if await next_page.is_disabled():
-                                    is_complete = True
-                                    break
-                                is_attached = await next_page.evaluate("el => el.isConnected")
-                                if not is_attached:
-                                    logger.warning(f"Элемент кнопки не прикреплен к DOM, повторная попытка {retry + 1}")
-                                    continue
-
-                                next_page_locator = main_page.locator(
-                                    "xpath=//div[@id='pagination-element']/nav/span[last()]/button")
-
-                                await next_page_locator.scroll_into_view_if_needed()
-                                await next_page_locator.click()
-
-                                next_page_clicked = True
-                                break
-                            else:
-                                logger.warning("Кнопка следующей страницы не найдена")
-                                break
-
-                        except Exception as e:
-                            logger.warning(
-                                f"Ошибка при попытке перейти на следующую страницу (попытка {retry + 1}): {e}")
-                            if retry < max_retries - 1:
-                                await asyncio.sleep(2)
-                                continue
-                            else:
-                                logger.error("Не удалось перейти на следующую страницу после всех попыток")
-                                break
+                    is_complete, next_page_clicked = await goto_next_page(main_page)
 
                     if is_complete:
                         logger.info("Достигнута последняя доступная страница")
@@ -256,6 +209,52 @@ async def main():
     finally:
         if browser:
             await browser.close()
+
+
+async def goto_next_page(page: Page) -> Tuple[bool, bool]:
+    max_retries = 7
+    next_page_clicked = False
+    is_complete = False
+
+    for retry in range(max_retries):
+        try:
+            await asyncio.sleep(2)
+
+            next_page = await page.query_selector(
+                "xpath=//div[@id='pagination-element']/nav/span[last()]/button")
+
+            if next_page:
+                if await next_page.is_disabled():
+                    is_complete = True
+                    break
+                is_attached = await next_page.evaluate("el => el.isConnected")
+                if not is_attached:
+                    logger.warning(f"Элемент кнопки не прикреплен к DOM, повторная попытка {retry + 1}")
+                    continue
+
+                next_page_locator = page.locator(
+                    "xpath=//div[@id='pagination-element']/nav/span[last()]/button")
+
+                await next_page_locator.scroll_into_view_if_needed()
+                await next_page_locator.click()
+
+                next_page_clicked = True
+                break
+            else:
+                logger.warning("Кнопка следующей страницы не найдена")
+                break
+
+        except Exception as e:
+            logger.warning(
+                f"Ошибка при попытке перейти на следующую страницу (попытка {retry + 1}): {e}")
+            if retry < max_retries - 1:
+                await asyncio.sleep(2)
+                continue
+            else:
+                logger.error("Не удалось перейти на следующую страницу после всех попыток")
+                break
+
+    return is_complete, next_page_clicked
 
 
 if __name__ == '__main__':
