@@ -243,7 +243,7 @@ async def main():
                                                 continue
 
                                             prompt_writer.writerow([index, name_syn])
-                                            metadata_writer.writerow([index, name_syn, name, ''])
+                                            metadata_writer.writerow([index, name_syn, name, ', '.join(keywords)])
 
                                             logger.info(f"[{index}] {name}")
                                             index += 1
