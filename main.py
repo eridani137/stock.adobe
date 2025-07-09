@@ -163,8 +163,6 @@ async def main():
                                                 logger.info("Скрипт не найден")
                                                 continue
 
-                                            keywords = []
-
                                             pattern = r'"keywords"\s*:\s*\[(.*?)\]'
                                             match = re.search(pattern, script_text)
 
@@ -176,15 +174,15 @@ async def main():
                                             valid_json_array = f"[{keywords_string}]"
                                             keywords = json.loads(valid_json_array)
 
-                                            # if image_name_stripped in seen_prompts:
-                                            #     logger.warning(f"Пропущен дубликат: {image_name_stripped}")
-                                            #     continue
+                                            if not keywords:
+                                                logger.error("Нет тегов")
+                                                continue
 
                                             prompt_writer.writerow([index, image_name_stripped])
 
                                             logger.info(f"[{index}] {image_name_stripped}")
 
-                                        index += 1
+                                            index += 1
                                     else:
                                         logger.warning(
                                             "Обнаружен элемент изображения без атрибута 'content' или 'href'. Пропускаем")
