@@ -44,7 +44,7 @@ async def main():
     passed_pages = 0
     index = 1
     browser = None
-    seen_prompts = set()
+    # seen_prompts = set()
     is_complete = False
 
     try:
@@ -59,9 +59,11 @@ async def main():
                 main_page = await browser.new_page()
                 await main_page.goto(url)
 
+                await asyncio.sleep(7)
+
                 while True:
 
-                    await asyncio.sleep(2)
+                    await asyncio.sleep(3)
 
                     images = await main_page.query_selector_all(
                         "xpath=//div[@id='search-results']/div//meta[@itemprop='name']")
@@ -74,11 +76,11 @@ async def main():
                                 image_name_stripped = image_name.replace('\n', ' ').strip()
                                 image_name_stripped = re.sub(r'\s+', ' ', image_name_stripped).strip()
 
-                                if image_name_stripped in seen_prompts:
-                                    logger.warning(f"Пропущен дубликат: {image_name_stripped}")
-                                    continue
+                                # if image_name_stripped in seen_prompts:
+                                #     logger.warning(f"Пропущен дубликат: {image_name_stripped}")
+                                #     continue
 
-                                seen_prompts.add(image_name_stripped)
+                                # seen_prompts.add(image_name_stripped)
                                 writer.writerow([index, image_name_stripped])
                                 logger.info(f"[{index}] {image_name_stripped}")
                                 index += 1
@@ -93,7 +95,7 @@ async def main():
                         logger.warning(f"Достигли заданное количество страниц")
                         break
 
-                    max_retries = 10
+                    max_retries = 7
                     next_page_clicked = False
 
                     for retry in range(max_retries):
@@ -142,7 +144,7 @@ async def main():
                         logger.warning("Не удалось найти или нажать кнопку следующей страницы")
                         break
 
-                    await asyncio.sleep(7)
+                    await asyncio.sleep(15)
 
                 logger.warning(f"Пройдено {count} страниц(ы), завершаем работу")
                 await browser.close()
