@@ -166,7 +166,6 @@ async def main():
     passed_pages = 0
     index = 1
     browser = None
-    is_first_page = True
 
     try:
         async with AsyncCamoufox(**config.BROWSER_OPTIONS) as browser_instance:
@@ -197,10 +196,10 @@ async def main():
                     max_field_size=8190 * 3,
                 )
 
-                is_first_page = False
+                need_wait_selector = False
 
                 while True:
-                    if not is_first_page:
+                    if need_wait_selector:
                         await main_page.wait_for_selector(selector, timeout=60000)
 
                     images = await main_page.query_selector_all(selector)
@@ -210,6 +209,7 @@ async def main():
                                 image_href = await image.get_attribute("href")
                                 image_name_elem = await image.query_selector("xpath=/meta[@itemprop='name']")
                                 if image_name_elem and image_href:
+                                    await image.scroll_into_view_if_needed()
                                     image_href += "?prev_url=detail"
                                     image_name_content = await image_name_elem.get_attribute("content")
                                     if image_name_content:
@@ -221,9 +221,8 @@ async def main():
 
                                             html = await response.text()
                                             keywords = get_keywords(html)
-
                                             if not keywords:
-                                                logger.error("Нет тегов")
+                                                logger.error("Теги не были получены: {}".format(image_href))
                                                 continue
 
                                             name_syn = replace_first_adjective(name)
@@ -262,6 +261,7 @@ async def main():
                         break
 
                     is_complete, next_page_clicked = await goto_next_page(main_page)
+                    need_wait_selector = True
 
                     if is_complete:
                         logger.info("Достигнута последняя доступная страница")
@@ -308,13 +308,12 @@ async def goto_next_page(page: Page) -> Tuple[bool, bool]:
     max_retries = 7
     next_page_clicked = False
     is_complete = False
+    selector = "xpath=//div[@id='pagination-element']/nav/span[last()]/button"
 
     for retry in range(max_retries):
         try:
-            await asyncio.sleep(2)
-
-            next_page = await page.query_selector(
-                "xpath=//div[@id='pagination-element']/nav/span[last()]/button")
+            await page.wait_for_selector(selector, timeout=60000)
+            next_page = await page.query_selector(selector)
 
             if next_page:
                 if await next_page.is_disabled():
@@ -325,8 +324,7 @@ async def goto_next_page(page: Page) -> Tuple[bool, bool]:
                     logger.warning(f"Элемент кнопки не прикреплен к DOM, повторная попытка {retry + 1}")
                     continue
 
-                next_page_locator = page.locator(
-                    "xpath=//div[@id='pagination-element']/nav/span[last()]/button")
+                next_page_locator = page.locator(selector)
 
                 await next_page_locator.scroll_into_view_if_needed()
                 await next_page_locator.click()
