@@ -192,8 +192,8 @@ async def main():
                 session = create_tls_session(
                     headers=headers.copy(),
                     cookies=aiohttp_cookies,
-                    max_line_size=8190 * 3,
-                    max_field_size=8190 * 3,
+                    max_line_size=8190 * 2,
+                    max_field_size=8190 * 2,
                 )
 
                 need_wait_selector = False
@@ -211,7 +211,7 @@ async def main():
                                 image_href = await image.get_attribute("href")
                                 image_name_elem = await image.query_selector("xpath=/meta[@itemprop='name']")
                                 duration = await image.query_selector("xpath=/meta[@itemprop='duration']")
-                                if image_name_elem and image_href and not duration and not "/3d-assets/" in image_href:
+                                if image_name_elem and image_href and not duration and not "/3d-assets/" in image_href and not "/templates/" in image_href:
                                     image_href += "?prev_url=detail"
                                     image_name_content = await image_name_elem.get_attribute("content")
                                     if image_name_content:
@@ -244,6 +244,9 @@ async def main():
 
                                             prompt_writer.writerow([index, name_syn])
                                             metadata_writer.writerow([index, name_syn, name, ', '.join(keywords)])
+
+                                            prompt_file.flush()
+                                            metadata_file.flush()
 
                                             logger.info(f"[{index}] {name}")
                                             index += 1
