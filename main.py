@@ -173,7 +173,7 @@ async def main():
             with open(first_file_path, 'w', newline='', encoding='utf-8') as prompt_file, \
                     open(second_file_path, 'w', newline='', encoding='utf-8') as metadata_file:
 
-                prompt_writer = csv.writer(prompt_file, quoting=csv.QUOTE_ALL)
+                prompt_writer = csv.writer(prompt_file, quoting=csv.QUOTE_NONNUMERIC)
                 prompt_writer.writerow(['ID', 'Prompt'])
 
                 metadata_writer = csv.writer(metadata_file, quoting=csv.QUOTE_NONNUMERIC)
