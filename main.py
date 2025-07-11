@@ -254,7 +254,11 @@ async def main():
                                                         f"Количество тегов {keywords_count}, не могу сделать срез 2-х слов")
                                                     continue
 
-                                                prompt_writer.writerow([index, name_syn])
+                                                prompt = re.sub(r'\s+([,.:)\'])', r'\1', prompt)
+                                                prompt = re.sub(r'([(\'])\s+', r'\1', prompt)
+                                                prompt = prompt.replace('"', '""')
+
+                                                prompt_writer.writerow([index, prompt])
                                                 metadata_writer.writerow([index, name_syn, name, ', '.join(keywords)])
 
                                                 prompt_file.flush()
