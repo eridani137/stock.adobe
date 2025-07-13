@@ -31,6 +31,8 @@ nltk.download('punkt_tab')
 nltk.download('averaged_perceptron_tagger_eng')
 nltk.download('omw-1.4')
 
+LONG_DELAY = 30
+
 headers = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) Gecko/20100101 Firefox/135.0',
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
@@ -181,8 +183,9 @@ async def main():
 
                 await main_page.goto(url)
 
+                await asyncio.sleep(LONG_DELAY)
+
                 selector = "xpath=//div[@id='search-results']/div/div/a"
-                await main_page.wait_for_selector(selector, timeout=60000)
 
                 cookies = await browser.contexts[0].cookies()
                 aiohttp_cookies = {cookie["name"]: cookie["value"] for cookie in cookies}
@@ -197,6 +200,9 @@ async def main():
                 need_wait_selector = False
 
                 while True:
+
+                    await asyncio.sleep(3)
+
                     try:
                         if session.closed:
                             cookies = await browser.contexts[0].cookies()
@@ -212,9 +218,7 @@ async def main():
                             )
 
                         if need_wait_selector:
-                            await main_page.wait_for_selector(selector, timeout=60000)
-
-                        await asyncio.sleep(5)
+                            await asyncio.sleep(LONG_DELAY)
 
                         images = await main_page.query_selector_all(selector)
                         if images:
@@ -333,7 +337,7 @@ async def goto_next_page(page: Page) -> Tuple[bool, bool]:
 
     for retry in range(max_retries):
         try:
-            await page.wait_for_selector(selector, timeout=60000)
+            await asyncio.sleep(LONG_DELAY)
             next_page = await page.query_selector(selector)
 
             if next_page:
